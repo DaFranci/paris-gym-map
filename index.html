@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paris Gym Map</title>
+<meta name="description" content="Every gym in Paris and Île-de-France on one map. Compare the chains side by side and find the gym closest to your home or your work.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="data.js"></script>
+<script src="clubs.js"></script>
+<style>
+  :root {
+    --bg: #f6f7fb; --panel: #ffffff; --fg: #14151a; --muted: #6b7080; --line: #e6e8ef; --hover: #f1f3f9;
+    --accent: #4f46e5; --accent-soft: #eef0ff; --shadow: 0 1px 2px rgba(16,24,40,.06), 0 4px 16px rgba(16,24,40,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1014; --panel: #17181d; --fg: #f2f3f7; --muted: #9a9fb0; --line: #272a33; --hover: #20222a;
+            --accent: #8b85ff; --accent-soft: #23233d; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.3); }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; font: 14px/1.45 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+               background: var(--bg); color: var(--fg); -webkit-font-smoothing: antialiased; }
+  #app { display: flex; height: 100%; }
+  #side { width: 360px; flex-shrink: 0; min-height: 0; display: flex; flex-direction: column; background: var(--panel);
+          border-right: 1px solid var(--line); box-shadow: var(--shadow); z-index: 500; }
+  #map { flex: 1; background: var(--bg); }
+
+  header { padding: 18px 18px 12px; }
+  .title-row { display: flex; align-items: center; gap: 10px; }
+  .logo { width: 34px; height: 34px; border-radius: 10px; background: var(--accent); color: #fff; flex-shrink: 0;
+          display: grid; place-items: center; }
+  .logo svg { width: 20px; height: 20px; }
+  h1 { font-size: 17px; font-weight: 700; letter-spacing: -.01em; margin: 0; flex: 1; min-width: 0; white-space: nowrap;
+       overflow: hidden; text-overflow: ellipsis; }
+  #tagline { margin: 12px 0 14px; font-size: 13px; color: var(--muted); }
+
+  .lang { display: flex; gap: 6px; }
+  .lang button { padding: 0; border: 0; background: none; cursor: pointer; border-radius: 4px; line-height: 0;
+                 opacity: .45; transition: opacity .15s, box-shadow .15s; }
+  .lang button:hover { opacity: .8; }
+  .lang button[aria-pressed="true"] { opacity: 1; box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent); }
+  .lang svg { width: 24px; height: 16px; border-radius: 3px; box-shadow: 0 0 0 1px rgba(0,0,0,.12); }
+
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat { background: var(--accent-soft); border-radius: 10px; padding: 8px 12px; }
+  .stat b { display: block; font-size: 20px; font-weight: 700; letter-spacing: -.02em; color: var(--accent); }
+  .stat span { font-size: 12px; color: var(--muted); }
+  #updated { margin-top: 8px; font-size: 11px; color: var(--muted); }
+
+  .controls { display: flex; gap: 6px; padding: 6px 18px; flex-wrap: wrap; }
+  .search { position: relative; width: 100%; }
+  .search svg { position: absolute; left: 11px; top: 50%; width: 15px; height: 15px; transform: translateY(-50%); color: var(--muted); }
+  input[type=search] { width: 100%; padding: 9px 12px 9px 34px; border: 1px solid var(--line); border-radius: 10px;
+                       background: var(--bg); color: var(--fg); font: inherit; outline: none; }
+  input[type=search]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .controls button { padding: 6px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+                     color: var(--fg); font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }
+  .controls button:hover { background: var(--hover); }
+
+  #list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 10px 16px; }
+  label.chain { position: relative; display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; cursor: pointer; }
+  label.chain:hover { background: var(--hover); }
+  label.chain input { position: absolute; opacity: 0; pointer-events: none; }
+  .swatch { width: 16px; height: 16px; border-radius: 5px; flex-shrink: 0; border: 2px solid var(--c); background: transparent;
+            display: grid; place-items: center; transition: background .15s; }
+  .swatch svg { width: 10px; height: 10px; color: #fff; opacity: 0; }
+  label.chain input:checked + .swatch { background: var(--c); }
+  label.chain input:checked + .swatch svg { opacity: 1; }
+  label.chain input:focus-visible + .swatch { box-shadow: 0 0 0 3px var(--accent-soft); }
+  .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  label.chain input:not(:checked) ~ .name { color: var(--muted); }
+  .count { font-variant-numeric: tabular-nums; font-size: 11px; font-weight: 600; color: var(--muted);
+           background: var(--hover); border-radius: 999px; padding: 1px 8px; }
+  .sep { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; padding: 14px 8px 6px; }
+
+  footer { padding: 10px 18px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); }
+  footer a { color: var(--muted); }
+
+  .leaflet-container { font: inherit; }
+  .leaflet-bar { border: 0 !important; box-shadow: var(--shadow) !important; border-radius: 10px !important; overflow: hidden; }
+  .leaflet-bar a { background: var(--panel); color: var(--fg); border-color: var(--line); }
+  .leaflet-popup-content-wrapper { border-radius: 12px; box-shadow: 0 8px 28px rgba(16,24,40,.18); }
+  .leaflet-popup-content { margin: 12px 14px; font-size: 13px; line-height: 1.45; }
+  .pop-chain { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: #555;
+               background: #f2f3f7; border-radius: 999px; padding: 2px 8px 2px 6px; margin-bottom: 6px; }
+  .pop-chain i { width: 8px; height: 8px; border-radius: 50%; }
+  .pop-name { font-weight: 700; font-size: 14px; margin-bottom: 2px; }
+  .pop-src { color: #777; font-size: 12px; margin-top: 6px; }
+  .leaflet-popup-content a { color: #4f46e5; font-weight: 500; }
+
+  @media (max-width: 700px) {
+    #app { flex-direction: column-reverse; }
+    #side { width: 100%; height: 52%; border-right: 0; border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; overflow-y: auto; }
+    #list { flex: none; overflow: visible; }  /* on phones the whole panel scrolls as one */
+    header { padding: 14px 16px 8px; }
+    #tagline { font-size: 12px; margin: 8px 0 10px; }
+    .stat { padding: 6px 10px; }
+    .stat b { font-size: 17px; }
+    .controls { padding: 6px 16px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <header>
+      <div class="title-row">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>
+        </div>
+        <h1 data-i18n="title"></h1>
+        <div class="lang" role="group" aria-label="Language">
+          <button type="button" data-lang="en" title="English" aria-label="English">
+            <svg viewBox="0 0 60 30"><clipPath id="uk-s"><path d="M0,0v30h60V0z"/></clipPath><clipPath id="uk-t"><path d="M30,15h30v15zv15H0zH0V0zV0h30z"/></clipPath><g clip-path="url(#uk-s)"><path d="M0,0v30h60V0z" fill="#012169"/><path d="M0,0 60,30M60,0 0,30" stroke="#fff" stroke-width="6"/><path d="M0,0 60,30M60,0 0,30" clip-path="url(#uk-t)" stroke="#C8102E" stroke-width="4"/><path d="M30,0v30M0,15h60" stroke="#fff" stroke-width="10"/><path d="M30,0v30M0,15h60" stroke="#C8102E" stroke-width="6"/></g></svg>
+          </button>
+          <button type="button" data-lang="fr" title="Français" aria-label="Français">
+            <svg viewBox="0 0 3 2"><path fill="#002395" d="M0 0h1v2H0z"/><path fill="#fff" d="M1 0h1v2H1z"/><path fill="#ED2939" d="M2 0h1v2H2z"/></svg>
+          </button>
+        </div>
+      </div>
+      <p id="tagline" data-i18n="tagline"></p>
+      <div class="stats">
+        <div class="stat"><b id="stat-gyms">–</b><span data-i18n="gymsLabel"></span></div>
+        <div class="stat"><b id="stat-chains">–</b><span data-i18n="chainsLabel"></span></div>
+      </div>
+      <div id="updated"></div>
+    </header>
+    <div class="controls">
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input type="search" id="search">
+      </div>
+    </div>
+    <div class="controls">
+      <button id="all" data-i18n="all"></button>
+      <button id="none" data-i18n="none"></button>
+      <button id="fit" data-i18n="fit"></button>
+    </div>
+    <div id="list"></div>
+    <footer id="footer"></footer>
+  </aside>
+  <div id="map"></div>
+</div>
+
+<script>
+// data.js: gyms from OpenStreetMap (made by fetch_gyms.py). clubs.js: chains' club lists from their websites.
+const MIN_LOCATIONS = 2; // fewer than this => listed under "other gyms"
+const DEFAULT_ON = 6;    // biggest N chains shown on first load
+const PALETTE = ['#e6194b','#3cb44b','#4363d8','#f58231','#911eb4','#42d4f4','#f032e6','#bfef45',
+                 '#469990','#9a6324','#800000','#000075','#808000','#ffe119','#dcbeff','#aaffc3','#fabed4','#ffd8b1'];
+const OTHER_COLOR = '#9ca3af';
+
+const map = L.map('map', { preferCanvas: true }).setView([48.8566, 2.3522], 11);
+// Esri light grey canvas: no API key, works from file:// (CARTO now needs a key, OSM tiles need a Referer)
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/';
+L.tileLayer(ESRI + 'World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+  attribution: 'Tiles © Esri — Esri, HERE, Garmin, © OpenStreetMap contributors', maxZoom: 16
+}).addTo(map);
+L.tileLayer(ESRI + 'World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16 }).addTo(map);
+
+const $ = id => document.getElementById(id);
+let chains = []; // {key, label, color, gyms:[], layer, on}
+
+// "Les Cercles de la Forme" / "cercles de la forme" / "Body Hit" / "Bodyhit" -> same key
+function normKey(s) {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .replace(/^(?:(?:les?|la)\s+|l['’]\s*)/, '').replace(/[^a-z0-9]/g, '');  // "La Salle" -> "salle", but "Lady Fit" stays
+}
+
+// Name variants the grouping can't catch on its own (matched against normKey).
+// Branch names ("Ritm - Ternes"), old brand names, sub-brands and bad typos.
+const CANONICAL = [
+  [/^r2training/, 'R2 Training'],       // Bastille + Vendôme (CrossFit affiliates, but one company)
+  [/^cercles?dela/, 'Les Cercles de la Forme'], // incl. typo "Cercle de la Frorme"
+  [/^ritm/, 'Ritm'],
+  [/johnreed/, 'John Reed'],            // incl. "Waris Dirie by John Reed"
+  [/foresthill/, 'Forest Hill'],        // incl. "Club Amiral by Forest Hill"
+  [/ucpa/, 'UCPA Sport Station'],
+  [/^(club)?moving/, 'Moving'],
+  [/^aqualoft/, 'Aqualoft'],
+  [/^qee/, 'Qee Yoga & Pilates'],
+  [/^monstade/, 'Mon Stade'],
+  [/^surface/, 'Surface'],
+  [/^onefitness/, 'One Fitness Club'],
+  [/^(so)?ladyfit$|^soladyfit/, 'So Lady Fit'],  // OSM "Lady Fit" = the So Lady Fit clubs; "Lady Fitness" stays separate
+  [/^clubmaillot|^clubgrenelle|^kenclub|^klay|^blanche$|^21blanche/, 'Masada clubs (ex-CMG)'],
+  [/^likeyou/, 'Like You Fitness'],
+  [/^fitnessmov/, 'Fitness Mov'],
+  [/^yay/, 'Yay'],
+];
+// Shared names that are NOT one company: CrossFit boxes are independent affiliates
+// licensing the name, so they are never grouped as a chain.
+// Vita Liberté's site lists no Île-de-France club and Le Vestiaire's Vincennes site is one club,
+// so same-named OSM entries are treated as unrelated gyms.
+const NOT_CHAINS = [/crossfit/, /^vitaliberte/, /^vestiaire/];
+// Gyms known to be closed but still in OpenStreetMap (OSM ids), hidden from the map.
+const CLOSED = new Set([
+  'way/1105816371', // CheapNess2, Villepinte area
+  'node/1399940600', // Waris Dirie by John Reed, Paris 16: John Reed's only club is now Paris So Ouest (Levallois)
+  'node/10130786581', // John Reed, Paris 14/15
+  'node/12739612715', // "Le Dome": duplicate of way/38692500 "Le Dôme", Saint-Germain-en-Laye
+]);
+// Brands that no longer exist; their OSM entries are outdated (matched against normKey of brand/name).
+const DEFUNCT = [
+  /^cmgsportsclub|^clubmedgym/, // CMG Sports Club (ex Club Med Gym): now only Club Maillot & Club Grenelle
+  /^(club)?moving/,             // Moving: moving.fr now redirects to Fitness Park
+];
+// Places that aren't gyms, left off the map (matched against normKey of brand/name).
+const NOT_GYMS = [
+  // sports & leisure clubs, pools, municipal sports halls
+  /foresthill|ucpa|piscine|aquatique|aquastade|gymnase|complexesportif|centresportif|stade|escalade|climb|arkose|trampoline|urbanjump|streetwork|speedsoccer|acrosport|kyudo|danse/,
+  // pilates, yoga, indoor cycling, aquabiking
+  /pilates|reformer|yoga|bikram|shala|^yay|thenewme|dynamo|cycling|spinning|waterbike|^aqua|kiwill/,
+  // electrostimulation (EMS) studios
+  /bodyhit|ironbodyfit|stimulation|electrostim|mybigbang|bod+yaddiction/,
+  // boxing, martial arts and class-only studios (incl. CrossFit/Hyrox boxes: you book sessions, no open gym floor)
+  /apollo|boxe|boxing|boxium|battlingclub|fight|mmafactory|kravmaga|selfdefense|graciebarra|kikentai|episod|polefitness|snaketwist|crossfit|r2training/,
+  // personal-training studios
+  /^surface|salledutemps|^(?!ladycoachclub).*coach|trainer|personaltraining/,  // "Lady Coach Club" looks like a women's gym
+];
+// Individual OSM entries left off the map.
+const REMOVED = new Set([
+  // sports clubs and university facilities
+  'relation/14695781', // Bât 685 - Centre omnisports universitaire, Gif-sur-Yvette
+  'way/313851886',     // La Croix-Catelan (Racing club), Paris 16
+  'way/165763294',     // La Faisanderie (Stade Français), Saint-Cloud
+  'way/78000202',      // US Métro Bizot, Paris 12
+  'node/4788234221',   // Wellness ACBB, Boulogne-Billancourt
+  // private, not open to the public
+  'node/13853277764',  // ENGIE Corporate Fitness, La Garenne-Colombes
+  'node/13825012851',  // Salle de sport du personnel, Villejuif
+  // duplicates
+  'node/2591281442',   // "Wellness", 2 rue du Faubourg du Temple = Wellness Sport Club République (already listed)
+  'node/683438716',    // Crossfit Lutèce: way/1554414370 is the same box, with its address
+  // unclear what they are
+  'way/63230061',      // "Batiment B", Gennevilliers
+  'node/12640560929',  // "Vélos d'appartement", Villetaneuse
+  // not gyms
+  'node/13638534765',  // Just Line, Houdan: coaching & massage studio
+  'node/6447595322',   // Body Om, Montrouge: wellness studio
+  'node/14177912206',  // Caudalie, Paris 4: spa / yoga & pilates
+  'node/4541807591',   // Détails Pilates, Enghien-les-Bains
+  'relation/9539017',  // Le Nautil: aquatic centre
+  'node/14142464652',  // Magic Zen, Paris 17: massage
+  'node/12348826530',  // Odozen, Chaville: coaching, EMS & cryotherapy
+  'node/721443159',    // Omm Studio, Paris 3: yoga & pilates
+  'node/13711002680',  // Amma Studio, Colombes: unverified
+  'node/13865858720',  // Ananda - Yulka, Neauphle-le-Château: unverified
+  'node/4016242321',   // nüdiet, Paris 17: unverified (name suggests a diet clinic)
+  // Liberty Gym has one club in the region, 39 rue des Amandiers (node/10844584379); these aren't it
+  'node/3689296452',   // "Liberty Gym", boulevard de Bercy, Paris 12
+  'node/5310274713',   // "Liberty Gym", Thiais
+  'node/6924594409',   // "Liberty Gym", rue de la Maison Rouge, Lognes
+  'node/7411167938',   // "Liberty Gym", rue Saint-Claude, Pontault-Combault
+  // class, coaching & wellness studios
+  'node/13658678453',     // Impact: pilates reformer & Lagree
+  'node/1990798379',      // Espace Jaya: yoga
+  'node/14003508111',     // Être Mieux En Corps: gym douce, pilates, yoga
+  'node/5193220868',      // Team Zeitoun: Thai boxing
+  'node/12906438459',     // Club Lulu: pilates & yoga
+  'node/3379306265',      // Ruyi Studio: session studio
+  'node/5381388487',      // Kore Studio: reformer
+  'node/12794835865',     // Hundred: pilates
+  'node/11202486801',     // Studio Métamorphose: pilates
+  'node/1000815236',      // Healthy Warriors: yoga
+  'node/9796100975',      // Naya: yoga
+  'node/6141069687',      // Les Oiseaux Parleurs: yoga
+  'node/12422400473',     // Swedish Fit Chaudron: group classes
+  'node/13267291273',     // R15 Studio: longevity studio
+  'node/14040183223',     // Le 131: functional training classes
+  'node/12740856821',     // Spark club: infrared class studio
+  'node/6119471424',      // Activ Body: coaching & EMS
+  'node/9346941312',      // Le Souffle de Jourdain: yoga & stretching
+  'node/12926370285',     // Être Aujourd'hui Viroflay: meditation association
+  'node/11496861914',     // KAH Studio: studio & café
+  'node/10089083238',     // Fit et Vous: EMS
+  'node/13694653196',     // Komet Studio: immersive class studio
+  'node/11264714280',     // Drip: HIIT studio
+  'node/10807924221',     // Millésime: private coaching
+  'node/11966173090',     // Global Impulse: EMS
+  'node/13076564879',     // Studioemma: pilates & yoga
+  'way/64039267',         // Le Health Village: corporate sport
+  'node/8691092909',      // Studio Move: Lagree
+  'node/13050312402',     // Studio Evolve: coaching
+  'node/9571461320',      // MaParenthèse: yoga & pilates
+  'node/4691027128',      // Brume: reformer, Lagree, hot pilates
+  'node/12933141370',     // Baba: yoga
+  'node/10922894882',     // Kurv: Lagree
+  'node/13300551379',     // Les ailes du canal: pilates & fitness classes
+  'node/12877641360',     // Genesis: yoga
+  'node/14212403421',     // Harmony Time: fitness classes
+  'node/13114749714',     // Studio Listen to You: yoga & pilates
+  'node/14100978626',     // Gym Pulse: EMS
+  'node/14174135256',     // Tecfit: EMS
+  'node/13013983610',     // Studio Marga: yoga
+  'node/6761410495',      // Nomeia: pilates & yoga
+  'node/14212403420',     // Libre: studio, café & workshop
+  'node/2876108787',      // LaFit: EMS
+  'node/13322225171',     // L’Académie 34: dance school & pilates
+  'node/13762426646',     // Family Move: family classes
+  'node/10946220825',     // Allsteps: interval-training classes
+  'node/6024671488',      // Clara & Jo: multi-activity class studio
+  'node/12541918599',     // Powerspot: small-group classes
+  'node/11251221364',     // O Ben Training: booked personal sessions
+  'node/13784481593',     // Red Legion: CrossFit box
+  'node/11384747369',     // StayFit: CrossFit Kaizoku box
+  'node/11877674628',     // Do Sport: sports association classes
+  'node/13668643901',     // Le vestiaire Vincennes: class programme: yoga, cross training, pilates, Hyrox
+  'node/11112502996',     // Kin&Form: cryotherapy centre
+  // pools & aquatic centres
+  'node/9748845447',      // Smart Body: aquabike
+  'node/12804670976',     // Eau & Forme: pool fitness
+  'way/44071035',         // L'Odyssée: aquatic leisure centre
+  'way/38692500',         // Le Dôme: intercommunal pool
+  // duplicates
+  'node/3655680391',      // Le Cercle Saint-Jacques: Cercles de la Forme Saint-Jacques, already listed
+  // probably closed (website gone)
+  'node/1824326226',     // Game Training Club
+  'node/5844668118',     // Proxiforme
+  'node/7411097055',     // Gym Place
+  'node/8662577766',     // Studio aopa
+  'node/8717094697',     // Kdbody Club
+  'node/9403724912',     // Studio 45
+  'node/9741677296',     // Fitness Marolles
+  'node/11219828081',    // Studio Rising
+  'node/13308059681',    // Smart Motion
+  'node/11921774304',    // Joy!
+  'way/220098867',       // Pastel Fitness Club
+  'node/11209627621',    // Le Labo by OmegaWorkout
+  'node/13136588796',    // 10h10 Sport Club
+  'relation/17802975',   // Le Prisme
+  'node/8838207781',     // Vita Liberté
+  'node/5926021824',     // CanalCentral
+  'node/9138406580',     // Vital House Gym
+  'node/10261401879',    // Le cube
+  // probably closed or moved
+  'node/4339952416',     // Daily Fitness
+  'node/5424380430',     // L'Atelier du Sport
+  'node/12460896380',    // True Grit House
+  'node/13082408008',    // Le Centre Elément
+  'node/4223259038',     // UrbanFitCenter
+  'node/10181547549',    // H Tec Fit
+  'node/12854033356',    // Chen
+  'node/4460276289',     // Amazonia
+  'node/10883956705',    // Bodytech Center
+  'node/11277188898',    // Lord&Co Sport
+  'node/8077547006',     // Masthanna Sport
+  'node/2711186603',     // Paradox
+  'node/13699165038',    // is-ok
+  'node/2409849217',     // Kajyn Platinium K13
+  // not gyms
+  'node/1640452952',     // Body & Brain, 75016 Paris: yoga & meditation
+  'node/10300535446',    // Salles de sport Bernard Lafay, 75017 Paris: municipal sports centre
+  'node/7260483477',     // Au garage club, 94300 Vincennes: class studio
+  'node/10812995353',    // Bien-être et Cie, 91310 Montlhéry: pilates studio
+  'node/10884721359',    // Chronofit, 75116 Paris: EMS
+  'node/13510653295',    // District Training Zone, 93100 Montreuil: combat sports
+  'node/14134924351',    // Encore, 94210 Saint-Maur-des-Fossés: Lagree studio
+  'node/9977851268',     // Espace Falguière, 75015 Paris: seminar room
+  'node/2799009834',     // Espace Yuzu, 75015 Paris: yoga
+  'node/8889320852',     // Fit Success, 75003 Paris: EMS
+  'node/10242149085',    // Fitness, 77420 Champs-sur-Marne: intercommunal aquatic centre
+  'node/11787475083',    // Flowfit, 91290 Arpajon: EMS
+  'way/433228688',       // Geo André, 77270 Villeparisis: municipal gymnasium
+  'node/9610342620',     // Glow Up Studio, 75004 Paris: reformer & café
+  'node/9404571717',     // Gym Loisirs & Bien être, 92140 Clamart: association classes
+  'node/6267883340',     // Hitbox PTC, 95220 Herblay-sur-Seine: coaching by appointment
+  'node/10689441819',    // Homa, 75010 Paris: cross training & Hyrox classes
+  'node/9481321100',     // inPulse Club, 75017 Paris: class studio
+  'way/74489680',        // Kbox, 92100 Boulogne-Billancourt: small-group classes
+  'node/14152961468',    // La brillance, 75007 Paris: private coaching
+  'node/12836350944',    // Le Studio, 92130 Issy-les-Moulineaux: yoga
+  'node/4824911524',     // Le Cercle, 75018 Paris: no such gym; the 18e Cercles de la Forme clubs are already listed
+  'node/12128465401',    // La Capsule, 94100 Saint-Maur-des-Fossés: address is a slimming centre
+  'node/10976553569',    // Mu:v, 75011 Paris: class studio
+  'node/9968290019',     // The Well, 75011 Paris: yoga & pilates
+  'node/8789958121',     // Le Vestiaire, 94300 Vincennes: same class studio as Le Vestiaire Vincennes
+  'node/4464040218',     // New Training, 92100 Boulogne-Billancourt: EMS
+  'node/2545445472',     // reform, 92120 Montrouge: reformer pilates
+  'node/12455964753',    // One Rep, 92110 Clichy: powerlifting club, Saint-Ouen
+  'node/6594908085',     // Sense Club, 75006 Paris: class studio
+  'node/1896121483',     // Slowe, 75018 Paris: wellness house
+  'node/9082433478',     // Sport Impulse, 75008 Paris: EMS
+  'node/6489994843',     // Studio Forme, 94300 Vincennes: EMS & cryotherapy
+  'node/3571220795',     // Studio Hit, 78000 Versailles: EMS
+  'node/1225227335',     // Studio 3C, 75016 Paris: small studio, possibly closed
+  'way/199164532',       // The Standard Athletic Club, 92190 Meudon: sports & social club
+  'way/113171085',       // Vibration, 77600 Bussy-Saint-Georges: dance school
+  'node/5932494586',     // VPunch Gym, 75018 Paris: boxing
+  // unverified
+  'node/3284932897',     // Best Training, 75016 Paris
+  'node/10825354708',    // Club 5, 75007 Paris
+  'node/5516416122',     // Flag, 75010 Paris
+  'node/10275491709',    // Fullbody, 92100 Boulogne-Billancourt
+  'node/10049022963',    // Gotham, 75017 Paris
+  'node/10031678867',    // Gymate, 75008 Paris
+  'node/12188738601',    // Heartspot, 75005 Paris
+  'node/11580004122',    // JCore Training, 75009 Paris
+  'node/5445508333',     // Kitten & Puppi, 75004 Paris
+  'node/10747045703',    // L'art de vivre, 75011 Paris
+  'node/13398641195',    // La source, 75011 Paris
+  'node/11621640230',    // Lofting, 92100 Boulogne-Billancourt
+  'node/13038914097',    // Metabolik, 77920 Samois-sur-Seine
+  'node/3523117796',     // Midtown Studio, 75116 Paris
+  'node/5915889005',     // Le Club, 75015 Paris
+  'node/14182636599',    // Optimum Studio, 92000 Nanterre
+  'node/13462252801',    // Parenthèse, 92100 Boulogne-Billancourt
+  'way/1416368848',      // Plateau fitness, 78000 Versailles
+  'node/12794835859',    // Ráfaga Studios, 75001 Paris
+  'way/1097410546',      // Riise, 75001 Paris
+  'node/8521278534',     // SDCL Center Maurepas, 78310 Maurepas
+  'node/8532210831',     // Sensa, 92250 La Garenne-Colombes
+  'node/5823279748',     // SOA, 94210 Saint-Maur-des-Fossés
+  'node/606174563',      // Studio Just 4 You, 95120 Ermont
+  'node/3427699193',     // Studio On, 75006 Paris
+  'node/2347328882',     // Studio selíni, 92700 Colombes
+  'node/14248725006',    // Sweat, 75009 Paris
+  'node/5343370533',     // The Gravity Studio, 75002 Paris
+  'node/13794363749',    // Unlock, 75017 Paris
+  'way/410063842',       // City de Fontainebleau, 77300 Fontainebleau
+]);
+const keyOf = g => normKey(g.tags.brand || g.tags.name || '');
+// Unnamed OSM entries can't be identified, so they're left off too.
+const isUnwanted = g => REMOVED.has(g.id) || (!g.source && !keyOf(g));
+const isOutdated = g => CLOSED.has(g.id) || DEFUNCT.some(re => re.test(keyOf(g)));
+const isNotGym = g => NOT_GYMS.some(re => re.test(keyOf(g)));  // brand for chain clubs, so "Fitness Park Stade de France" stays
+
+function editDistance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++)
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+function groupChains(gyms) {
+  const groups = new Map();
+  for (const g of gyms) {
+    let raw = g.tags.brand || g.tags.name || '';
+    const rule = raw && CANONICAL.find(([re]) => re.test(normKey(raw)));
+    if (rule) raw = rule[1];
+    else if (raw && NOT_CHAINS.some(re => re.test(normKey(raw)))) raw = '';
+    const key = raw ? normKey(raw) : '';
+    if (!groups.has(key)) groups.set(key, { key, names: {}, gyms: [] });
+    const grp = groups.get(key);
+    grp.gyms.push(g);
+    if (raw) grp.names[raw] = (grp.names[raw] || 0) + 1;
+  }
+  const all = [...groups.values()].filter(x => x.key).sort((a, b) => b.gyms.length - a.gyms.length);
+  const big = [];
+  const other = { key: '__other', gyms: [] };  // independents and chains with one club in the region
+  // Fold variants into the larger chain: "Dynamo Spinning" -> "Dynamo", and one-letter
+  // typos like "Fitness Parc" -> "Fitness Park" (also "Fitness Parc Issy").
+  const belongsTo = (key, b) => b.key.length >= 5 && (key.startsWith(b.key) ||
+    (b.key.length >= 8 && [-1, 0, 1].some(d => editDistance(key.slice(0, b.key.length + d), b.key) <= 1)));
+  for (const grp of all) {
+    const parent = big.find(b => belongsTo(grp.key, b));
+    if (parent) {
+      parent.gyms.push(...grp.gyms);
+      for (const n in grp.names) parent.names[n] = (parent.names[n] || 0) + grp.names[n];
+    } else if (grp.gyms.length >= MIN_LOCATIONS) big.push(grp);
+    else other.gyms.push(...grp.gyms);
+  }
+  other.gyms.push(...(groups.get('')?.gyms || []));
+  // A chain with its own club list (clubs.js) shows only those clubs; its OSM entries are dropped.
+  for (const b of big) if (b.gyms.some(g => g.source)) b.gyms = b.gyms.filter(g => g.source);
+  big.sort((a, b) => b.gyms.length - a.gyms.length);
+  big.forEach((b, i) => {
+    b.label = Object.entries(b.names).sort((x, y) => y[1] - x[1])[0][0];
+    b.color = PALETTE[i % PALETTE.length];
+    b.on = i < DEFAULT_ON;
+  });
+  other.color = OTHER_COLOR; other.on = false;
+  return [...big, other];
+}
+
+// Interface text in English and French
+const TEXT = {
+  en: {
+    title: 'Paris Gym Map',
+    tagline: 'Every gym in Paris and Île-de-France, on one map. Compare the chains side by side and find the one closest to your home or your work.',
+    search: 'Filter chains…', all: 'All', none: 'None', fit: 'Zoom to selected',
+    other: 'Other gyms', otherHeading: 'Single location in Île-de-France',
+    gymsLabel: 'gyms', chainsLabel: 'chains', updated: date => `Updated ${date}`,
+    srcSite: 'Source: official website', srcOsm: 'Source: OpenStreetMap', website: 'Website', osm: 'View on OSM',
+    footer: 'Gym data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors and the gyms’ official websites. Map tiles © Esri.',
+    noData: 'No gym data found.',
+  },
+  fr: {
+    title: 'Carte des salles de sport',
+    tagline: 'Toutes les salles de sport de Paris et d’Île-de-France, sur une seule carte. Comparez les enseignes et trouvez la plus proche de chez vous ou de votre travail.',
+    search: 'Filtrer les enseignes…', all: 'Toutes', none: 'Aucune', fit: 'Zoomer sur la sélection',
+    other: 'Autres salles', otherHeading: 'Un seul site en Île-de-France',
+    gymsLabel: 'salles de sport', chainsLabel: 'enseignes', updated: date => `Mis à jour le ${date}`,
+    srcSite: 'Source : site officiel', srcOsm: 'Source : OpenStreetMap', website: 'Site web', osm: 'Voir sur OSM',
+    footer: 'Données © contributeurs <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> et sites officiels des salles. Fond de carte © Esri.',
+    noData: 'Aucune donnée trouvée.',
+  },
+};
+let lang = 'en';
+try { lang = localStorage.getItem('lang') || ''; } catch (e) {}
+if (!TEXT[lang]) lang = (navigator.language || '').toLowerCase().startsWith('fr') ? 'fr' : 'en';
+const t = key => TEXT[lang][key];
+const chainLabel = c => c.key === '__other' ? t('other') : c.label;
+let updated = 0;
+
+function popupHtml(g, chain) {
+  const tg = g.tags, esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const addr = tg.address || [[tg['addr:housenumber'], tg['addr:street']].filter(Boolean).join(' '), tg['addr:postcode']].filter(Boolean).join(', ');
+  const site = tg.website || tg['contact:website'];
+  const link = (href, text) => `<a href="${esc(href)}" target="_blank" rel="noopener">${text}</a>`;
+  const other = chain.key === '__other';
+  return (other ? '' : `<div class="pop-chain"><i style="background:${chain.color}"></i>${esc(chain.label)}</div>`) +
+    `<div class="pop-name">${esc(tg.name || chain.label)}</div>` +
+    (addr ? `<div>${esc(addr)}</div>` : '') +
+    (tg.opening_hours ? `<div class="pop-src">${esc(tg.opening_hours)}</div>` : '') +
+    (g.source
+      ? `<div class="pop-src">${t('srcSite')}</div>` + (site ? link(site, t('website')) : '')
+      : `<div class="pop-src">${t('srcOsm')}</div>` + (site ? link(site, t('website')) + ' · ' : '') +
+        link('https://www.openstreetmap.org/' + g.id, t('osm')));
+}
+
+function build(gyms) {
+  chains.forEach(c => c.layer && map.removeLayer(c.layer));
+  chains = groupChains(gyms);
+  for (const c of chains) {
+    c.layer = L.layerGroup(c.gyms.map(g =>
+      L.circleMarker([g.lat, g.lon], {
+        radius: c.key === '__other' ? 4.5 : 7.5, color: '#fff', weight: 2,
+        fillColor: c.color, fillOpacity: c.key === '__other' ? 0.7 : 0.95
+      }).bindPopup(() => popupHtml(g, c))
+    ));
+    if (c.on) c.layer.addTo(map);
+  }
+  renderText();
+}
+
+function renderStatus() {
+  if (!chains.length) return;
+  const fmt = new Intl.NumberFormat(lang === 'fr' ? 'fr-FR' : 'en-GB');
+  $('stat-gyms').textContent = fmt.format(chains.reduce((n, c) => n + c.gyms.length, 0));
+  $('stat-chains').textContent = fmt.format(chains.length - 1);
+  const date = new Date(updated).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  $('updated').textContent = TEXT[lang].updated(date);
+}
+
+// All language-dependent text on the page
+function renderText() {
+  document.documentElement.lang = lang;
+  document.title = t('title');
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('.lang button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === lang)));
+  $('search').placeholder = t('search');
+  $('footer').innerHTML = t('footer');
+  map.closePopup();
+  renderStatus();
+  renderList();
+}
+
+function setOn(c, on) {
+  c.on = on;
+  if (on) c.layer.addTo(map); else map.removeLayer(c.layer);
+}
+
+function renderList() {
+  const f = normKey($('search').value || '');
+  const list = $('list');
+  list.innerHTML = '';
+  chains.forEach(c => {
+    if (f && !normKey(chainLabel(c)).includes(f)) return;
+    if (c.key === '__other') {
+      const h = document.createElement('div');
+      h.className = 'sep';
+      h.textContent = t('otherHeading');
+      list.appendChild(h);
+    }
+    const el = document.createElement('label');
+    el.className = 'chain';
+    el.style.setProperty('--c', c.color);
+    el.innerHTML = `<input type="checkbox" ${c.on ? 'checked' : ''}>` +
+      `<span class="swatch"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2 5 8.5l4.5-5"/></svg></span>` +
+      `<span class="name"></span><span class="count">${c.gyms.length}</span>`;
+    el.querySelector('.name').textContent = chainLabel(c);
+    el.querySelector('input').onchange = e => setOn(c, e.target.checked);
+    list.appendChild(el);
+  });
+}
+
+function visibleChains() {
+  const f = normKey($('search').value || '');
+  return chains.filter(c => !f || normKey(chainLabel(c)).includes(f));
+}
+
+$('search').oninput = renderList;
+$('all').onclick = () => { visibleChains().forEach(c => c.key !== '__other' && setOn(c, true)); renderList(); };
+$('none').onclick = () => { visibleChains().forEach(c => setOn(c, false)); renderList(); };
+$('fit').onclick = () => {
+  const pts = chains.filter(c => c.on).flatMap(c => c.gyms.map(g => [g.lat, g.lon]));
+  if (pts.length) map.fitBounds(pts, { padding: [30, 30], maxZoom: 15 });
+};
+document.querySelectorAll('.lang button').forEach(b => b.onclick = () => {
+  lang = b.dataset.lang;
+  try { localStorage.setItem('lang', lang); } catch (e) {}
+  renderText();
+});
+
+// Chains' club lists (clubs.js); they replace those chains' OpenStreetMap entries
+function chainClubs() {
+  return (window.CLUBS?.clubs || []).map((c, i) => ({
+    lat: c.lat, lon: c.lon, id: c.website || 'club/' + i, source: 'site',
+    tags: { brand: c.chain, name: c.name, address: c.address, website: c.website }
+  }));
+}
+
+if (window.GYM_DATA) {
+  updated = Math.max(window.GYM_DATA.t || 0, window.CLUBS?.updated || 0);
+  build([...window.GYM_DATA.gyms.filter(g => !isOutdated(g)), ...chainClubs()]
+    .filter(g => !isNotGym(g) && !isUnwanted(g)));
+} else {
+  renderText();
+  $('status').textContent = t('noData');
+}
+</script>
+</body>
+</html>
