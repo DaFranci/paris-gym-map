@@ -95,9 +95,28 @@
   .pop-src { color: #777; font-size: 12px; margin-top: 6px; }
   .leaflet-popup-content a { color: #4f46e5; font-weight: 500; }
 
+  .sheet-bar { display: none; }
+  /* Phones: full-screen map, filters in a bottom sheet that peeks out as a slim bar */
   @media (max-width: 700px) {
-    #app { flex-direction: column-reverse; }
-    #side { width: 100%; height: 52%; border-right: 0; border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; overflow-y: auto; }
+    :root { --peek: calc(56px + env(safe-area-inset-bottom, 0px)); }
+    #app { display: block; }
+    #map { height: 100%; isolation: isolate; }  /* keep Leaflet's controls (z-index 1000) under the sheet */
+    #side { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; width: 100%; height: 85vh; height: 85dvh;
+            border-right: 0; border-radius: 16px 16px 0 0; box-shadow: 0 -4px 24px rgba(16,24,40,.18);
+            overflow-y: auto; overscroll-behavior: contain;
+            transform: translateY(calc(100% - var(--peek))); transition: transform .25s ease; }
+    #side:not(.open) { overflow: hidden; }
+    #side.open { transform: none; }
+    .sheet-bar { display: flex; position: sticky; top: 0; z-index: 1; flex-shrink: 0; width: 100%; height: 56px;
+                 align-items: center; gap: 10px; padding: 10px 18px 0; border: 0; border-bottom: 1px solid var(--line);
+                 background: var(--panel); color: var(--fg); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+    .sheet-bar::before { content: ''; position: absolute; top: 6px; left: 50%; width: 36px; height: 4px; margin-left: -18px;
+                         border-radius: 2px; background: var(--line); }
+    .sheet-bar svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--accent); }
+    .sheet-bar span { flex: 1; }
+    .sheet-bar .chev { color: var(--muted); transition: transform .25s; }
+    #side.open .sheet-bar .chev { transform: rotate(180deg); }
+    .leaflet-bottom { bottom: var(--peek); }
     #list { flex: none; overflow: visible; }  /* on phones the whole panel scrolls as one */
     header { padding: 14px 16px 8px; }
     #tagline { font-size: 12px; margin: 8px 0 10px; }
@@ -110,6 +129,11 @@
 <body>
 <div id="app">
   <aside id="side">
+    <button type="button" class="sheet-bar" id="sheet-toggle" aria-expanded="false" aria-controls="side">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+      <span id="sheet-summary"></span>
+      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg>
+    </button>
     <header>
       <div class="title-row">
         <div class="logo" aria-hidden="true">
@@ -492,6 +516,7 @@ const TEXT = {
     search: 'Filter chains…', all: 'All', none: 'None', fit: 'Zoom to selected',
     other: 'Other gyms', otherHeading: 'Single location in Île-de-France',
     gymsLabel: 'gyms', chainsLabel: 'chains', updated: date => `Updated ${date}`,
+    shown: n => n === 1 ? '1 chain on the map' : `${n} chains on the map`,
     srcSite: 'Source: official website', srcOsm: 'Source: OpenStreetMap', website: 'Website', osm: 'View on OSM',
     footer: 'Gym data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors and the gyms’ official websites. Map tiles © Esri.',
     noData: 'No gym data found.',
@@ -502,6 +527,7 @@ const TEXT = {
     search: 'Filtrer les enseignes…', all: 'Toutes', none: 'Aucune', fit: 'Zoomer sur la sélection',
     other: 'Autres salles', otherHeading: 'Un seul site en Île-de-France',
     gymsLabel: 'salles de sport', chainsLabel: 'enseignes', updated: date => `Mis à jour le ${date}`,
+    shown: n => n <= 1 ? `${n} enseigne sur la carte` : `${n} enseignes sur la carte`,
     srcSite: 'Source : site officiel', srcOsm: 'Source : OpenStreetMap', website: 'Site web', osm: 'Voir sur OSM',
     footer: 'Données © contributeurs <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> et sites officiels des salles. Fond de carte © Esri.',
     noData: 'Aucune donnée trouvée.',
@@ -564,12 +590,19 @@ function renderText() {
   $('footer').innerHTML = t('footer');
   map.closePopup();
   renderStatus();
+  renderSummary();
   renderList();
+}
+
+// Bottom-sheet bar on phones (hidden on desktop)
+function renderSummary() {
+  $('sheet-summary').textContent = TEXT[lang].shown(chains.filter(c => c.on).length);
 }
 
 function setOn(c, on) {
   c.on = on;
   if (on) c.layer.addTo(map); else map.removeLayer(c.layer);
+  renderSummary();
 }
 
 function renderList() {
@@ -606,8 +639,25 @@ $('all').onclick = () => { visibleChains().forEach(c => c.key !== '__other' && s
 $('none').onclick = () => { visibleChains().forEach(c => setOn(c, false)); renderList(); };
 $('fit').onclick = () => {
   const pts = chains.filter(c => c.on).flatMap(c => c.gyms.map(g => [g.lat, g.lon]));
+  setSheet(false);
   if (pts.length) map.fitBounds(pts, { padding: [30, 30], maxZoom: 15 });
 };
+
+// Phones: tap or swipe the bar to open/close the sheet, tap the map to close it.
+// The .open class has no effect on desktop.
+function setSheet(open) {
+  $('side').classList.toggle('open', open);
+  $('sheet-toggle').setAttribute('aria-expanded', String(open));
+  if (!open) $('side').scrollTop = 0;
+}
+$('sheet-toggle').onclick = () => setSheet(!$('side').classList.contains('open'));
+let touchY = null;
+$('sheet-toggle').addEventListener('touchstart', e => { touchY = e.touches[0].clientY; }, { passive: true });
+$('sheet-toggle').addEventListener('touchend', e => {
+  const dy = e.changedTouches[0].clientY - touchY;
+  if (Math.abs(dy) > 30) { e.preventDefault(); setSheet(dy < 0); }  // a swipe, not a tap
+});
+map.on('click', () => setSheet(false));
 document.querySelectorAll('.lang button').forEach(b => b.onclick = () => {
   lang = b.dataset.lang;
   try { localStorage.setItem('lang', lang); } catch (e) {}
